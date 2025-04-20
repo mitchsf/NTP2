@@ -15,6 +15,7 @@ A modern, non-blocking NTP client library for Arduino and ESP32-based boards, wi
 1. Download the [latest release](https://github.com/mitch@feig.com/NTP2).
 2. Unzip into your Arduino `libraries/` folder.
 3. Restart the Arduino IDE.
+4. update() MUST be in loop().
 
 Or install directly via **Arduino Library Manager** (when published).
 
