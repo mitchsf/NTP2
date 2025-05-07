@@ -192,7 +192,8 @@ bool NTP2::checkValid() {
 }
 
 time_t NTP2::epoch() {
-  return utcTime;
+ uint32_t elapsedSeconds = (millis() - lastResponseMillis) / 1000;
+ return utcTime + elapsedSeconds;
 }
 
 uint32_t NTP2::timestamp() {
