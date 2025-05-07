@@ -20,7 +20,7 @@ A modern, non-blocking, lightweight, NTP client library for Arduino and ESP32-ba
 
 Or install directly via **Arduino Library Manager** (when published).
 
-## 🧪 Example
+## 🧪 Overly Simplified Example
 
 ```cpp
 #include <WiFi.h>
