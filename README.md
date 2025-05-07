@@ -9,6 +9,7 @@ A modern, non-blocking NTP client library for Arduino and ESP32-based boards, wi
 - Supports both domain and IP-based server configuration
 - Configurable poll intervals, response timeouts, and retry delays
 - Minimal resource usage
+- I won't provoke an NTP server to test KoD reporting, but ChatGPT checked and confirmed that it will (should) work
 
 ## 📦 Installation
 
