@@ -1,6 +1,6 @@
 # NTP2
 
-A modern, non-blocking NTP client library for Arduino and ESP32-based boards, with support for Kiss-o'-Death (KoD) reporting.
+A modern, non-blocking, lightweight, NTP client library for Arduino and ESP32-based boards, with support for Kiss-o'-Death (KoD) reporting.
 
 ## 🔧 Features
 
