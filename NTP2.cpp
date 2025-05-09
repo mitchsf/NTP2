@@ -51,11 +51,6 @@ void NTP2::retryDelay(uint32_t newDelay) {
   retryDelayValue = newDelay;
 }
 
-void NTP2::pollInterval(uint32_t newInterval) {
-  activeInterval = newInterval;
-  defaultInterval = newInterval;
-}
-
 NTPStatus NTP2::forceUpdate() {
   // If a request is pending, ignore forcing.
   if (requestTimestamp != 0) {
