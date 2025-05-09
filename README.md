@@ -64,7 +64,6 @@ Check the `examples/NTP2_Basic` sketch for full usage.
 ntp.updateInterval(ms);      // Set poll interval
 ntp.responseDelay(ms);       // Time to wait before reading response
 ntp.retryDelay(ms);          // Retry delay after failure or KoD
-ntp.pollInterval(ms);        // Alias for updateInterval
 ntp.forceUpdate();           // Force an immediate query
 ```
 
