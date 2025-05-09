@@ -71,7 +71,6 @@ class NTP2 {
     void updateInterval(unsigned long int uInterval);
     void responseDelay(uint32_t newDelay);
     void retryDelay(uint32_t newDelay);
-    void pollInterval(uint32_t newInterval);
 
     // update() sends a request if needed, processes a response if available,
     // and returns:
