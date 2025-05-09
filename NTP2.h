@@ -28,7 +28,7 @@ typedef unsigned long time_t;
 #define NTP_PORT           123
 #define NTP_RESPONSE_DELAY 250          // in ms
 #define NTP_RETRY_DELAY    30000        // in ms
-#define NTP_POLL_INTERVAL  1800000      // in ms
+#define NTP_POLL_INTERVAL  3600000      // in ms
 
 // Simplified enumeration for status codes.
 enum NTPStatus : uint8_t {
@@ -106,6 +106,8 @@ class NTP2 {
     // Low-level functions.
     NTPStatus sendNTPRequest();
     NTPStatus processNTPResponse();
+    
+    // Calculate time difference (no helper needed as uint32_t subtraction handles overflow)
 
     UDP *udp;
     const char* server = nullptr;
@@ -120,12 +122,14 @@ class NTP2 {
     uint32_t activeInterval = defaultInterval;
     uint32_t responseDelayValue = NTP_RESPONSE_DELAY;
     uint32_t retryDelayValue = NTP_RETRY_DELAY;
-    uint32_t utcTime = 0;
     uint32_t lastUpdate = 0;
-    uint32_t ntpTime = 0;
     uint32_t requestTimestamp = 0;  // When the request was sent.
     uint32_t lastResponseMillis = 0; // When a valid response was received.
-
+    
+    // Improved time keeping
+    uint32_t ntpTimeSeconds = 0;     // NTP seconds value from last successful sync
+    uint32_t localMillisAtSync = 0;  // Local millis() when last sync happened
+    
     bool force = false;  // Flag for forcing an update.
     NTPStatus ntpSt = NTP_BAD_PACKET; // Last status code.
 
