@@ -1,6 +1,6 @@
 /* NTP2.cpp
-NTP2 library for Arduino - non-blocking, Kiss-o'-Death codes
-   The MIT License (MIT)
+   NTP2 library for Arduino - non-blocking, KoD-aware
+   Updated to fix timing, race, and KoD handling issues
    (c) 2025 Mitch Feig (mitch@feig.com)
 */
 
@@ -16,12 +16,11 @@ NTP2::~NTP2() {
 
 void NTP2::begin() {
   begin(NTP_SERVER);
-  // Force an update at startup.
   lastUpdate = millis() - activeInterval;
 }
 
 void NTP2::begin(const char* server) {
-  this->server = server;
+  this->server = server ? server : NTP_SERVER;
   udp->begin(NTP_PORT);
   force = true;
   lastUpdate = millis() - activeInterval;
@@ -29,6 +28,7 @@ void NTP2::begin(const char* server) {
 
 void NTP2::begin(IPAddress serverIP) {
   this->serverIP = serverIP;
+  this->server = nullptr;
   udp->begin(NTP_PORT);
   force = true;
   lastUpdate = millis() - activeInterval;
@@ -38,9 +38,8 @@ void NTP2::stop() {
   udp->stop();
 }
 
-void NTP2::updateInterval(unsigned long int uInterval) {
-  activeInterval = uInterval;
-  defaultInterval = uInterval;
+void NTP2::updateInterval(unsigned long uInterval) {
+  activeInterval = defaultInterval = uInterval;
 }
 
 void NTP2::responseDelay(uint32_t newDelay) {
@@ -52,59 +51,46 @@ void NTP2::retryDelay(uint32_t newDelay) {
 }
 
 NTPStatus NTP2::forceUpdate() {
-  // If a request is pending, ignore forcing.
-  if (requestTimestamp != 0) {
-    ntpSt = NTP_BAD_PACKET;
-    return ntpSt;
-  }
+  if (requestTimestamp != 0) return NTP_BAD_PACKET;
   force = true;
   return update();
 }
 
-// Note: No helper function needed as uint32_t subtraction automatically handles overflow
-// Example: 500 - 4294967000 = 500 + (2^32 - 4294967000) = 500 + 1296 = 1796
-
 NTPStatus NTP2::update() {
-  // If there is a valid response latched that has not been delivered, deliver GOOD_TIME exactly once.
-  if (pendingGood) {
-    pendingGood = false;
-    ntpSt = NTP_CONNECTED;
-    return ntpSt;
-  }
-  
-  // If a request is pending:
   if (requestTimestamp != 0) {
-    if (millis() - requestTimestamp >= responseDelayValue) {
+    if ((int32_t)(millis() - requestTimestamp) >= (int32_t)responseDelayValue) {
       return processNTPResponse();
     } else {
       return NTP_IDLE;
     }
   }
-  
-  // If no request is pending and the active interval has elapsed, send a new request.
-  if (millis() - lastUpdate >= activeInterval) {
+
+  if (force || (int32_t)(millis() - lastUpdate) >= (int32_t)activeInterval) {
     return sendNTPRequest();
   }
-  
+
+  if (pendingGood) {
+    pendingGood = false;
+    return NTP_CONNECTED;
+  }
+
   return NTP_IDLE;
 }
 
 NTPStatus NTP2::sendNTPRequest() {
-  // Clear the latch.
   pendingGood = false;
-  ntpTimeSeconds = 0;
   lastUpdate = millis();
+  t1 = millis();
   init();
-  
-  if (server == nullptr) {
-    udp->beginPacket(serverIP, NTP_PORT);
-  } else {
-    udp->beginPacket(server, NTP_PORT);
+
+  bool success = server ? udp->beginPacket(server, NTP_PORT)
+                        : udp->beginPacket(serverIP, NTP_PORT);
+
+  if (!success || udp->write(ntpRequest, NTP_PACKET_SIZE) != NTP_PACKET_SIZE || !udp->endPacket()) {
+    ntpSt = NTP_BAD_PACKET;
+    return ntpSt;
   }
-    
-  udp->write(ntpRequest, NTP_PACKET_SIZE);
-  udp->endPacket();
-  
+
   requestTimestamp = millis();
   force = false;
   ntpSt = NTP_IDLE;
@@ -112,140 +98,84 @@ NTPStatus NTP2::sendNTPRequest() {
 }
 
 NTPStatus NTP2::processNTPResponse() {
-  requestTimestamp = 0; // Clear pending request.
-  uint8_t size = udp->parsePacket();
-  
-  if (size != NTP_PACKET_SIZE) {
+  requestTimestamp = 0;
+  if (udp->parsePacket() != NTP_PACKET_SIZE || udp->read(ntpQuery, NTP_PACKET_SIZE) != NTP_PACKET_SIZE) {
     return badRead();
   }
-  
-  udp->read(ntpQuery, NTP_PACKET_SIZE);
-  
-  // Check for a KoD (Kiss‑o‑Death) packet.
-  if (ntpQuery[1] == 0) {
-    char kodMessage[5] = { ntpQuery[12], ntpQuery[13], ntpQuery[14], ntpQuery[15], '\0' };
-    for (size_t i = 0; i < sizeof(kodLookup) / sizeof(kodLookup[0]); i++) {
-      if (strcmp(kodMessage, kodLookup[i].code) == 0) {
-        return static_cast<NTPStatus>(kodLookup[i].ret);
+
+  t4 = millis();
+  uint8_t mode = ntpQuery[0] & 0x07;
+  uint8_t stratum = ntpQuery[1];
+
+  if (stratum == 0 && (mode == 4 || mode == 5)) {
+    char kod[5] = {ntpQuery[12], ntpQuery[13], ntpQuery[14], ntpQuery[15], '\0'};
+    for (auto& k : kodLookup) {
+      if (strcmp(kod, k.code) == 0) {
+        activeInterval = retryDelayValue;
+        ntpSt = static_cast<NTPStatus>(k.ret);
+        return ntpSt;
       }
     }
     activeInterval = retryDelayValue;
     ntpSt = NTP_UNKNOWN_KOD;
     return ntpSt;
   }
-   
-  // Process the NTP response correctly - extract the transmit timestamp
-  // NTP timestamp is seconds since 1900-01-01
-  ntpTimeSeconds = ((uint32_t)ntpQuery[40] << 24) | 
-                   ((uint32_t)ntpQuery[41] << 16) | 
-                   ((uint32_t)ntpQuery[42] << 8) | 
-                    (uint32_t)ntpQuery[43];
-  
-  // Store the local millis() at the time of sync
-  localMillisAtSync = millis();
-  
-  if (checkValid()) {
-    if (activeInterval != defaultInterval) {
-      activeInterval = defaultInterval;
-    }
-    ntpSt = NTP_CONNECTED;
-    lastResponseMillis = millis();
-    // Latch the good response so that the next update() call returns GOOD_TIME exactly once.
-    pendingGood = true;
-    return NTP_IDLE;  // Return IDLE now; on the next update() call, GOOD_TIME is delivered.
-  } else {
-    return badRead();
-  }
+
+  uint32_t txSec = ((uint32_t)ntpQuery[40] << 24) |
+                   ((uint32_t)ntpQuery[41] << 16) |
+                   ((uint32_t)ntpQuery[42] << 8)  |
+                   (uint32_t)ntpQuery[43];
+  uint32_t txFrac = ((uint32_t)ntpQuery[44] << 24) |
+                    ((uint32_t)ntpQuery[45] << 16) |
+                    ((uint32_t)ntpQuery[46] << 8)  |
+                    (uint32_t)ntpQuery[47];
+  uint32_t fracMillis = (uint32_t)((uint64_t)txFrac * 1000 / 0x100000000ULL);
+
+  if (!checkValid(txSec)) return badRead();
+
+  ntpTimeSeconds = txSec;
+  lastSyncMillis = millis();
+  ntpMillisAtSync = (uint64_t)txSec * 1000 + fracMillis;
+  if (activeInterval != defaultInterval) activeInterval = defaultInterval;
+
+  lastResponseMillis = millis();
+  ntpSt = NTP_CONNECTED;
+  pendingGood = true;
+  return NTP_IDLE;
 }
 
 NTPStatus NTP2::badRead() {
   activeInterval = retryDelayValue;
+  ntpTimeSeconds = 0;
   ntpSt = NTP_BAD_PACKET;
   return ntpSt;
 }
 
 void NTP2::init() {
   memset(ntpRequest, 0, NTP_PACKET_SIZE);
-  ntpRequest[0] = 0b11100011;  // LI=0, Version=4, Mode=3 (client)
-  ntpRequest[1] = 0;
-  ntpRequest[2] = 6;
-  ntpRequest[3] = 0xEC;
-  ntpRequest[12] = 49;
-  ntpRequest[13] = 0x4E;
-  ntpRequest[14] = 49;
-  ntpRequest[15] = 52;
+  ntpRequest[0] = 0b00100011;
+  uint32_t now = millis() / 1000;
+  ntpRequest[40] = (now >> 24) & 0xFF;
+  ntpRequest[41] = (now >> 16) & 0xFF;
+  ntpRequest[42] = (now >> 8) & 0xFF;
+  ntpRequest[43] = now & 0xFF;
 }
 
-bool NTP2::checkValid() {
-  // If we didn't get a transmit timestamp, packet is invalid
-  if (ntpTimeSeconds == 0) {
-    return false;
-  }
-  
-  // Check leap indicator (LI) field - shouldn't be 3 (alarm condition)
-  if ((ntpQuery[0] & 0xC0) == 0xC0) {
-    return false;
-  }
-  
-  // Check the version number - should be 3 or 4
+bool NTP2::checkValid(uint32_t tempTimeSeconds) {
+  if (tempTimeSeconds == 0) return false;
   uint8_t version = (ntpQuery[0] & 0x38) >> 3;
-  if (version < 3 || version > 4) {
-    return false;
-  }
-  
-  // Check the mode - should be 4 (server) or 5 (broadcast)
+  if (version < 3 || version > 4) return false;
   uint8_t mode = ntpQuery[0] & 0x07;
-  if (mode != 4 && mode != 5) {
-    return false;
-  }
-  
-  // Check stratum - should be between 1 and 15
-  if (ntpQuery[1] < 1 || ntpQuery[1] > 15) {
-    return false;
-  }
-  
-  // Extract key timestamp fields for further validation
-  uint32_t refTsSec = ((uint32_t)ntpQuery[16] << 24) | 
-                     ((uint32_t)ntpQuery[17] << 16) | 
-                     ((uint32_t)ntpQuery[18] << 8) | 
-                      (uint32_t)ntpQuery[19];
-                     
-  uint32_t origTsSec = ((uint32_t)ntpQuery[24] << 24) | 
-                      ((uint32_t)ntpQuery[25] << 16) | 
-                      ((uint32_t)ntpQuery[26] << 8) | 
-                       (uint32_t)ntpQuery[27];
-                      
-  uint32_t recvTsSec = ((uint32_t)ntpQuery[32] << 24) | 
-                      ((uint32_t)ntpQuery[33] << 16) | 
-                      ((uint32_t)ntpQuery[34] << 8) | 
-                       (uint32_t)ntpQuery[35];
-  
-  // Perform basic sanity checks on timestamps
-  // Reference timestamp shouldn't be 0
-  if (refTsSec == 0) {
-    return false;
-  }
-  
-  // Receive timestamp should be non-zero and not later than transmit timestamp
-  if (recvTsSec == 0 || recvTsSec > ntpTimeSeconds) {
-    return false;
-  }
-  
-  return true;
+  if (mode != 4 && mode != 5) return false;
+  uint8_t stratum = ntpQuery[1];
+  return (stratum >= 1 && stratum <= 15);
 }
 
 time_t NTP2::epoch() {
-  if (ntpTimeSeconds == 0 || localMillisAtSync == 0) {
-    return 0; // No valid synchronization has occurred
-  }
-  
-  // Calculate how many seconds have elapsed since our last sync
-  uint32_t millisSinceSync = millis() - localMillisAtSync;
-  uint32_t secondsSinceSync = millisSinceSync / 1000;
-  
-  // Return the current time as seconds since UNIX epoch (1970-01-01)
-  // NTP time starts at 1900-01-01, so subtract 70 years worth of seconds
-  return (time_t)(ntpTimeSeconds - SEVENTYYEARS + secondsSinceSync);
+  if (ntpTimeSeconds == 0 || lastSyncMillis == 0) return 0;
+  uint32_t now = millis();
+  uint32_t elapsed = (int32_t)(now - lastSyncMillis);
+  return (time_t)(ntpTimeSeconds - SEVENTYYEARS + (elapsed / 1000));
 }
 
 uint32_t NTP2::timestamp() {
