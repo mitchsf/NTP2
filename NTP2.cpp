@@ -59,7 +59,11 @@ NTPStatus NTP2::forceUpdate() {
 NTPStatus NTP2::update() {
   if (requestTimestamp != 0) {
     if ((int32_t)(millis() - requestTimestamp) >= (int32_t)responseDelayValue) {
-      return processNTPResponse();
+      NTPStatus result = processNTPResponse();
+      if (result == NTP_CONNECTED) {
+        return NTP_CONNECTED;
+      }
+      return result;
     } else {
       return NTP_IDLE;
     }
@@ -69,18 +73,11 @@ NTPStatus NTP2::update() {
     return sendNTPRequest();
   }
 
-  if (pendingGood) {
-    pendingGood = false;
-    return NTP_CONNECTED;
-  }
-
   return NTP_IDLE;
 }
 
 NTPStatus NTP2::sendNTPRequest() {
-  pendingGood = false;
   lastUpdate = millis();
-  t1 = millis();
   init();
 
   bool success = server ? udp->beginPacket(server, NTP_PORT)
@@ -99,14 +96,23 @@ NTPStatus NTP2::sendNTPRequest() {
 
 NTPStatus NTP2::processNTPResponse() {
   requestTimestamp = 0;
-  if (udp->parsePacket() != NTP_PACKET_SIZE || udp->read(ntpQuery, NTP_PACKET_SIZE) != NTP_PACKET_SIZE) {
+  
+  // Flush any stale packets in UDP buffer
+  while (udp->parsePacket() > 0) {
+    if (udp->read(ntpQuery, NTP_PACKET_SIZE) == NTP_PACKET_SIZE) {
+      break; // Found a complete packet
+    }
+  }
+  
+  // Validate we got a complete packet
+  if (udp->available() > 0 || ntpQuery[0] == 0) {
     return badRead();
   }
 
-  t4 = millis();
   uint8_t mode = ntpQuery[0] & 0x07;
   uint8_t stratum = ntpQuery[1];
 
+  // Check for Kiss-o'-Death
   if (stratum == 0 && (mode == 4 || mode == 5)) {
     char kod[5] = {ntpQuery[12], ntpQuery[13], ntpQuery[14], ntpQuery[15], '\0'};
     for (auto& k : kodLookup) {
@@ -121,6 +127,7 @@ NTPStatus NTP2::processNTPResponse() {
     return ntpSt;
   }
 
+  // Extract transmit timestamp
   uint32_t txSec = ((uint32_t)ntpQuery[40] << 24) |
                    ((uint32_t)ntpQuery[41] << 16) |
                    ((uint32_t)ntpQuery[42] << 8)  |
@@ -129,19 +136,23 @@ NTPStatus NTP2::processNTPResponse() {
                     ((uint32_t)ntpQuery[45] << 16) |
                     ((uint32_t)ntpQuery[46] << 8)  |
                     (uint32_t)ntpQuery[47];
+  
+  // Validate transmit timestamp is non-zero
+  if (txSec == 0) return badRead();
+  
   uint32_t fracMillis = (uint32_t)((uint64_t)txFrac * 1000 / 0x100000000ULL);
 
   if (!checkValid(txSec)) return badRead();
 
   ntpTimeSeconds = txSec;
   lastSyncMillis = millis();
-  ntpMillisAtSync = (uint64_t)txSec * 1000 + fracMillis;
+  // Fix overflow: cast txSec to uint64_t before multiplication
+  ntpMillisAtSync = ((uint64_t)txSec * 1000ULL) + fracMillis;
   if (activeInterval != defaultInterval) activeInterval = defaultInterval;
 
   lastResponseMillis = millis();
   ntpSt = NTP_CONNECTED;
-  pendingGood = true;
-  return NTP_IDLE;
+  return NTP_CONNECTED;
 }
 
 NTPStatus NTP2::badRead() {
@@ -163,11 +174,19 @@ void NTP2::init() {
 
 bool NTP2::checkValid(uint32_t tempTimeSeconds) {
   if (tempTimeSeconds == 0) return false;
+  
+  // Check Leap Indicator (bits 7-6): reject if 3 (alarm/unsynchronized)
+  uint8_t li = (ntpQuery[0] & 0xC0) >> 6;
+  if (li == 3) return false;
+  
   uint8_t version = (ntpQuery[0] & 0x38) >> 3;
   if (version < 3 || version > 4) return false;
+  
   uint8_t mode = ntpQuery[0] & 0x07;
   if (mode != 4 && mode != 5) return false;
+  
   uint8_t stratum = ntpQuery[1];
+  // Reject stratum 0 (already handled as KoD) and stratum 16 (unsynchronized)
   return (stratum >= 1 && stratum <= 15);
 }
 

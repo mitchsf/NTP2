@@ -86,25 +86,22 @@ class NTP2 {
     uint32_t requestTimestamp = 0;
     uint32_t lastResponseMillis = 0;
     uint32_t lastSyncMillis = 0;
-    uint32_t t1 = 0;
-    uint32_t t4 = 0;
     uint32_t ntpTimeSeconds = 0;
     uint64_t ntpMillisAtSync = 0;
 
     bool force = false;
     NTPStatus ntpSt = NTP_BAD_PACKET;
-    bool pendingGood = false;
 
     struct KodEntry {
       const char *code;
       uint8_t ret;
     };
 
-    inline static const KodEntry kodLookup[16] = {
+    inline static const KodEntry kodLookup[15] = {
       {"RATE", 0x10}, {"DENY", 0x11}, {"ACST", 0x12}, {"AUTH", 0x13},
       {"AUTO", 0x14}, {"BCST", 0x15}, {"CRYP", 0x16}, {"DROP", 0x17},
       {"RSTR", 0x18}, {"INIT", 0x19}, {"MCST", 0x1A}, {"NKEY", 0x1B},
-      {"NTSN", 0x1C}, {"RMOT", 0x1D}, {"STEP", 0x1E}, {"UNKN", 0x20}
+      {"NTSN", 0x1C}, {"RMOT", 0x1D}, {"STEP", 0x1E}
     };
 };
 
