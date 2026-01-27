@@ -1,6 +1,7 @@
 /* NTP2.cpp
    NTP2 library for Arduino - non-blocking, KoD-aware
    Updated to fix timing, race, and KoD handling issues
+   Fixed epoch() calculation for accurate timekeeping
    (c) 2025 Mitch Feig (mitch@feig.com)
 */
 
@@ -192,9 +193,18 @@ bool NTP2::checkValid(uint32_t tempTimeSeconds) {
 
 time_t NTP2::epoch() {
   if (ntpTimeSeconds == 0 || lastSyncMillis == 0) return 0;
+  
+  // Calculate elapsed time using proper signed arithmetic for millis() wraparound
   uint32_t now = millis();
-  uint32_t elapsed = (int32_t)(now - lastSyncMillis);
-  return (time_t)(ntpTimeSeconds - SEVENTYYEARS + (elapsed / 1000));
+  int32_t elapsedMs = (int32_t)(now - lastSyncMillis);
+  
+  // Use the stored high-precision timestamp and add elapsed time
+  // This preserves fractional seconds from the NTP response
+  uint64_t currentNtpMillis = ntpMillisAtSync + elapsedMs;
+  
+  // Convert to Unix epoch (seconds since Jan 1, 1970)
+  // NTP epoch is Jan 1, 1900, so subtract 70 years in seconds
+  return (time_t)((currentNtpMillis / 1000ULL) - SEVENTYYEARS);
 }
 
 uint32_t NTP2::timestamp() {
