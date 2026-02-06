@@ -7,7 +7,7 @@ A lightweight, non-blocking NTP (Network Time Protocol) client library for Ardui
 - **Non-blocking operation** - doesn't freeze your sketch while waiting for responses
 - **RFC 5905 compliant** - handles all standard Kiss-o'-Death codes
 - **Configurable intervals** - set custom poll, retry, and response timeouts
-- **Millisecond precision** - stores fractional seconds for sub-second accuracy
+- **Millisecond precision** - stores fractional seconds for sub-second accuracy (untested)
 - **Automatic error recovery** - backs off on rate limiting and errors
 - **Stratum validation** - verifies server quality and synchronization status
 - **Overflow-safe** - handles timestamp calculations correctly through 2106
