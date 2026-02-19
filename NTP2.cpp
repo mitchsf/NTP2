@@ -97,16 +97,25 @@ NTPStatus NTP2::sendNTPRequest() {
 
 NTPStatus NTP2::processNTPResponse() {
   requestTimestamp = 0;
+  memset(ntpQuery, 0, NTP_PACKET_SIZE);
   
-  // Flush any stale packets in UDP buffer
-  while (udp->parsePacket() > 0) {
-    if (udp->read(ntpQuery, NTP_PACKET_SIZE) == NTP_PACKET_SIZE) {
-      break; // Found a complete packet
+  // Read all available packets, keeping the last complete one
+  // This flushes stale packets and handles servers sending extensions
+  bool gotPacket = false;
+  int packetSize;
+  while ((packetSize = udp->parsePacket()) > 0) {
+    if (packetSize >= NTP_PACKET_SIZE) {
+      udp->read(ntpQuery, NTP_PACKET_SIZE);
+      // Discard any trailing bytes (extension fields, padding)
+      while (udp->available()) udp->read();
+      gotPacket = true;
+    } else {
+      // Undersized packet — discard entirely
+      while (udp->available()) udp->read();
     }
   }
   
-  // Validate we got a complete packet
-  if (udp->available() > 0 || ntpQuery[0] == 0) {
+  if (!gotPacket) {
     return badRead();
   }
 
@@ -126,6 +135,21 @@ NTPStatus NTP2::processNTPResponse() {
     activeInterval = retryDelayValue;
     ntpSt = NTP_UNKNOWN_KOD;
     return ntpSt;
+  }
+
+  // Correlate response to our most recent request by checking Originate Timestamp.
+  // This prevents accepting stale/unrelated packets.
+  uint32_t orgSec  = ((uint32_t)ntpQuery[24] << 24) |
+                     ((uint32_t)ntpQuery[25] << 16) |
+                     ((uint32_t)ntpQuery[26] << 8)  |
+                     (uint32_t)ntpQuery[27];
+  uint32_t orgFrac = ((uint32_t)ntpQuery[28] << 24) |
+                     ((uint32_t)ntpQuery[29] << 16) |
+                     ((uint32_t)ntpQuery[30] << 8)  |
+                     (uint32_t)ntpQuery[31];
+
+  if (orgSec != reqTxSec || orgFrac != reqTxFrac) {
+    return badRead();
   }
 
   // Extract transmit timestamp
@@ -158,19 +182,33 @@ NTPStatus NTP2::processNTPResponse() {
 
 NTPStatus NTP2::badRead() {
   activeInterval = retryDelayValue;
-  ntpTimeSeconds = 0;
+  // Do NOT zero ntpTimeSeconds — preserve last known good time
+  // so epoch() continues returning valid time between syncs
   ntpSt = NTP_BAD_PACKET;
   return ntpSt;
 }
 
 void NTP2::init() {
   memset(ntpRequest, 0, NTP_PACKET_SIZE);
+  // LI=0, VN=4, Mode=3 (client)
   ntpRequest[0] = 0b00100011;
-  uint32_t now = millis() / 1000;
-  ntpRequest[40] = (now >> 24) & 0xFF;
-  ntpRequest[41] = (now >> 16) & 0xFF;
-  ntpRequest[42] = (now >> 8) & 0xFF;
-  ntpRequest[43] = now & 0xFF;
+
+  // Request token for request/response correlation.
+  // We write a deterministic 64-bit value into the Transmit Timestamp field.
+  // The server must copy it into the Originate Timestamp field in its response.
+  uint32_t nowMs = millis();
+  reqTxSec  = nowMs;   // token (not an actual NTP seconds value)
+  reqTxFrac = 0;
+
+  ntpRequest[40] = (reqTxSec >> 24) & 0xFF;
+  ntpRequest[41] = (reqTxSec >> 16) & 0xFF;
+  ntpRequest[42] = (reqTxSec >> 8)  & 0xFF;
+  ntpRequest[43] = (reqTxSec)       & 0xFF;
+
+  ntpRequest[44] = (reqTxFrac >> 24) & 0xFF;
+  ntpRequest[45] = (reqTxFrac >> 16) & 0xFF;
+  ntpRequest[46] = (reqTxFrac >> 8)  & 0xFF;
+  ntpRequest[47] = (reqTxFrac)       & 0xFF;
 }
 
 bool NTP2::checkValid(uint32_t tempTimeSeconds) {
@@ -197,14 +235,23 @@ time_t NTP2::epoch() {
   // Calculate elapsed time using proper signed arithmetic for millis() wraparound
   uint32_t now = millis();
   int32_t elapsedMs = (int32_t)(now - lastSyncMillis);
+  if (elapsedMs < 0) elapsedMs = 0;
   
   // Use the stored high-precision timestamp and add elapsed time
   // This preserves fractional seconds from the NTP response
-  uint64_t currentNtpMillis = ntpMillisAtSync + elapsedMs;
+  uint64_t currentNtpMillis = ntpMillisAtSync + (uint32_t)elapsedMs;
   
   // Convert to Unix epoch (seconds since Jan 1, 1970)
   // NTP epoch is Jan 1, 1900, so subtract 70 years in seconds
-  return (time_t)((currentNtpMillis / 1000ULL) - SEVENTYYEARS);
+  time_t unixNow = (time_t)((currentNtpMillis / 1000ULL) - SEVENTYYEARS);
+
+  // Plausibility guard: reject obviously-wrong epochs.
+  // Adjust these bounds if you need to support earlier dates.
+  const time_t MIN_OK = 946684800UL;   // 2000-01-01
+  const time_t MAX_OK = 4102444800UL;  // 2100-01-01
+  if (unixNow < MIN_OK || unixNow > MAX_OK) return 0;
+
+  return unixNow;
 }
 
 uint32_t NTP2::timestamp() {
