@@ -84,6 +84,9 @@ class NTP2 {
     uint32_t retryDelayValue = NTP_RETRY_DELAY;
     uint32_t lastUpdate = 0;
     uint32_t requestTimestamp = 0;
+    // Request token (copied back by server into Originate Timestamp)
+    uint32_t reqTxSec = 0;
+    uint32_t reqTxFrac = 0;
     uint32_t lastResponseMillis = 0;
     uint32_t lastSyncMillis = 0;
     uint32_t ntpTimeSeconds = 0;
