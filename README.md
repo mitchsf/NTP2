@@ -122,7 +122,7 @@ NTP2 uses a non-blocking state machine:
 3. After response timeout, processes packet and validates
 4. Returns `NTP_CONNECTED` on success or error status on failure
 5. Automatically backs off on errors using configurable retry delay
-6. Handles Kiss-o'-Death codes per RFC 5905
+6. Handles Kiss-o'-Death codes per RFC 5905 (untested because I won't provoke an NTP server)
 
 The library validates:
 - NTP version (3 or 4)
