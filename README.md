@@ -136,13 +136,13 @@ The library validates:
 - **Protocol**: NTP v3/v4 (RFC 5905)
 - **UDP Port**: 123
 - **Packet Size**: 48 bytes
-- **Precision**: Millisecond (stores fractional seconds)
+- **Precision**: Millisecond (stores fractional seconds - untested)
 - **Time Base**: Unix epoch (January 1, 1970)
 - **Overflow Safe**: Until February 2106
 
 ## License
 
-Copyright (c) 2025 Mitch Feig (mitch@feig.com)
+Copyright (c) 2026 Mitch Feig (mitch@feig.com)
 
 ## Credits
 
