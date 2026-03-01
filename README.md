@@ -146,4 +146,4 @@ Copyright (c) 2026 Mitch Feig (mitch@feig.com)
 
 ## Credits
 
-Updated and maintained by Mitch Feig with improvements for RFC compliance, race condition fixes, and enhanced validation.
+Updated and maintained by Mitch Feig with improvements for RFC compliance, race condition fixes, and enhanced validation. Much of the testing and enhancements were made by Anthropic Claude Sonnet 4.6 Extended.
