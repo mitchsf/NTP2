@@ -146,4 +146,3 @@ Copyright (c) 2026 Mitch Feig (mitch@feig.com)
 
 ## Credits
 
-Updated and maintained by Mitch Feig with improvements for RFC compliance, race condition fixes, and enhanced validation.
