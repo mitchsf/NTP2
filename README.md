@@ -4,13 +4,17 @@ A lightweight, non-blocking NTP (Network Time Protocol) client library for Ardui
 
 ## Features
 
-- **Non-blocking operation** - doesn't freeze your sketch while waiting for responses
-- **RFC 5905 compliant** - handles all standard Kiss-o'-Death codes
-- **Configurable intervals** - set custom poll, retry, and response timeouts
-- **Millisecond precision** - stores fractional seconds for sub-second accuracy (untested)
-- **Automatic error recovery** - backs off on rate limiting and errors
-- **Stratum validation** - verifies server quality and synchronization status
-- **Overflow-safe** - handles timestamp calculations correctly through 2106
+- **Non-blocking operation** — doesn't freeze your sketch while waiting for responses
+- **RFC 5905 compliant** — handles all standard Kiss-o'-Death codes
+- **Request/response correlation** — stamps each request with a token in the Transmit Timestamp field; rejects responses whose Originate Timestamp doesn't match, preventing acceptance of stale or unrelated packets
+- **Stale packet flushing** — reads all queued UDP packets and keeps only the last valid one, handling servers that send extension fields or duplicate responses
+- **Configurable intervals** — set custom poll, retry, and response timeouts
+- **Millisecond precision** — stores fractional seconds from the NTP Transmit Timestamp for sub-second accuracy (untested)
+- **Automatic error recovery** — backs off to retry interval on errors; restores default interval on next success
+- **Graceful degradation** — `badRead()` preserves the last known good time so `epoch()` continues returning valid timestamps between syncs
+- **Plausibility guard** — `epoch()` rejects obviously wrong timestamps outside the 2000–2100 range
+- **Stratum validation** — verifies server quality and synchronization status
+- **Overflow-safe** — handles `millis()` wraparound and NTP timestamp calculations correctly through 2106
 
 ## Installation
 
@@ -100,43 +104,56 @@ The `update()` method returns one of these status codes:
 
 ### Methods
 
-- `void begin()` - Initialize with default server (pool.ntp.org)
-- `void begin(const char* server)` - Initialize with hostname
-- `void begin(IPAddress serverIP)` - Initialize with IP address
-- `void stop()` - Stop NTP client and release UDP port
-- `NTPStatus update()` - Non-blocking update, call frequently in loop()
-- `NTPStatus forceUpdate()` - Force immediate sync request
-- `time_t epoch()` - Get current Unix timestamp (seconds since 1970)
-- `uint32_t timestamp()` - Get milliseconds of last successful sync
-- `bool ntpStat()` - Returns true if synchronized
-- `void updateInterval(unsigned long ms)` - Set polling interval
-- `void responseDelay(uint32_t ms)` - Set response timeout
-- `void retryDelay(uint32_t ms)` - Set error retry delay
+- `void begin()` — Initialize with default server (pool.ntp.org)
+- `void begin(const char* server)` — Initialize with hostname
+- `void begin(IPAddress serverIP)` — Initialize with IP address
+- `void stop()` — Stop NTP client and release UDP port
+- `NTPStatus update()` — Non-blocking update, call frequently in loop()
+- `NTPStatus forceUpdate()` — Force immediate sync request
+- `time_t epoch()` — Get current Unix timestamp (seconds since 1970)
+- `uint32_t timestamp()` — Get millis() value at last successful sync
+- `bool ntpStat()` — Returns true if last sync succeeded
+- `void updateInterval(unsigned long ms)` — Set polling interval
+- `void responseDelay(uint32_t ms)` — Set response timeout
+- `void retryDelay(uint32_t ms)` — Set error retry delay
+
+### Defaults
+
+| Parameter | Default | Define |
+|-----------|---------|--------|
+| Server | `pool.ntp.org` | `NTP_SERVER` |
+| Poll interval | 3,600,000 ms (1 hr) | `NTP_POLL_INTERVAL` |
+| Response timeout | 250 ms | `NTP_RESPONSE_DELAY` |
+| Retry delay | 30,000 ms (30 s) | `NTP_RETRY_DELAY` |
 
 ## How It Works
 
 NTP2 uses a non-blocking state machine:
 
-1. When poll interval expires, sends NTP request
-2. Returns `NTP_IDLE` while waiting for response
-3. After response timeout, processes packet and validates
-4. Returns `NTP_CONNECTED` on success or error status on failure
-5. Automatically backs off on errors using configurable retry delay
-6. Handles Kiss-o'-Death codes per RFC 5905 (untested because I won't provoke an NTP server)
+1. When the poll interval expires (or `forceUpdate()` is called), sends an NTP request with a correlation token in the Transmit Timestamp field.
+2. Returns `NTP_IDLE` while waiting for the response timeout to elapse.
+3. After the timeout, reads all queued UDP packets, keeping the last one of valid size (≥ 48 bytes). This flushes stale packets and discards extension fields.
+4. Validates the response: checks that the Originate Timestamp matches the request token, then verifies protocol fields and extracts the Transmit Timestamp.
+5. On success, stores the NTP time with fractional-second precision, resets the poll interval, and returns `NTP_CONNECTED`.
+6. On failure, switches to the retry interval but preserves the last known good time so `epoch()` remains usable.
+7. Handles Kiss-o'-Death packets per RFC 5905, mapping all 15 standard KoD codes to distinct status values.
 
-The library validates:
-- NTP version (3 or 4)
-- Mode (server or broadcast)
-- Stratum (1-15, rejects unsynchronized servers)
-- Leap indicator (rejects alarm condition)
-- Transmit timestamp (non-zero)
+### Validation checks
+
+- Originate Timestamp matches request token (correlation)
+- NTP version 3 or 4
+- Mode 4 (server) or 5 (broadcast)
+- Stratum 1–15 (rejects 0/KoD and 16/unsynchronized)
+- Leap Indicator ≠ 3 (alarm/unsynchronized)
+- Transmit Timestamp non-zero
+- Unix epoch within 2000–2100 plausibility window
 
 ## Technical Details
 
 - **Protocol**: NTP v3/v4 (RFC 5905)
 - **UDP Port**: 123
 - **Packet Size**: 48 bytes
-- **Precision**: Millisecond (stores fractional seconds - untested)
+- **Precision**: Millisecond (stores fractional seconds — untested)
 - **Time Base**: Unix epoch (January 1, 1970)
 - **Overflow Safe**: Until February 2106
 
