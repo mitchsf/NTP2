@@ -11,7 +11,7 @@ A lightweight, non-blocking NTP (Network Time Protocol) client library for Ardui
 - **Configurable intervals** — set custom poll, retry, and response timeouts
 - **Millisecond precision** — stores fractional seconds from the NTP Transmit Timestamp for sub-second accuracy (untested)
 - **Automatic error recovery** — backs off to retry interval on errors; restores default interval on next success
-- **Graceful degradation** — `badRead()` preserves the last known good time so `epoch()` continues returning valid timestamps between syncs
+- **Strict time validity** — `badRead()` invalidates cached time so `epoch()` returns 0 until the next successful sync; retries automatically at the retry interval
 - **Plausibility guard** — `epoch()` rejects obviously wrong timestamps outside the 2000–2100 range
 - **Stratum validation** — verifies server quality and synchronization status
 - **Overflow-safe** — handles `millis()` wraparound and NTP timestamp calculations correctly through 2106
@@ -110,7 +110,7 @@ The `update()` method returns one of these status codes:
 - `void stop()` — Stop NTP client and release UDP port
 - `NTPStatus update()` — Non-blocking update, call frequently in loop()
 - `NTPStatus forceUpdate()` — Force immediate sync request
-- `time_t epoch()` — Get current Unix timestamp (seconds since 1970)
+- `time_t epoch()` — Get current Unix timestamp (returns 0 if no valid sync)
 - `uint32_t timestamp()` — Get millis() value at last successful sync
 - `bool ntpStat()` — Returns true if last sync succeeded
 - `void updateInterval(unsigned long ms)` — Set polling interval
@@ -135,7 +135,7 @@ NTP2 uses a non-blocking state machine:
 3. After the timeout, reads all queued UDP packets, keeping the last one of valid size (≥ 48 bytes). This flushes stale packets and discards extension fields.
 4. Validates the response: checks that the Originate Timestamp matches the request token, then verifies protocol fields and extracts the Transmit Timestamp.
 5. On success, stores the NTP time with fractional-second precision, resets the poll interval, and returns `NTP_CONNECTED`.
-6. On failure, switches to the retry interval but preserves the last known good time so `epoch()` remains usable.
+6. On failure, invalidates cached time so `epoch()` returns 0, switches to the retry interval, and keeps retrying until a successful sync.
 7. Handles Kiss-o'-Death packets per RFC 5905, mapping all 15 standard KoD codes to distinct status values.
 
 ### Validation checks
