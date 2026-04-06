@@ -182,8 +182,9 @@ NTPStatus NTP2::processNTPResponse() {
 
 NTPStatus NTP2::badRead() {
   activeInterval = retryDelayValue;
-  // Do NOT zero ntpTimeSeconds — preserve last known good time
-  // so epoch() continues returning valid time between syncs
+  ntpTimeSeconds = 0;
+  lastSyncMillis = 0;
+  ntpMillisAtSync = 0;
   ntpSt = NTP_BAD_PACKET;
   return ntpSt;
 }
