@@ -5,7 +5,7 @@ A lightweight, non-blocking NTP (Network Time Protocol) client library for Ardui
 ## Features
 
 - **Non-blocking operation** — doesn't freeze your sketch while waiting for responses
-- **RFC 5905 compliant** — handles all standard Kiss-o'-Death codes (untested because I won't provoke an NTP server)
+- **RFC 5905 compliant** — handles all standard Kiss-o'-Death codes (untested)
 - **Request/response correlation** — stamps each request with a token in the Transmit Timestamp field; rejects responses whose Originate Timestamp doesn't match, preventing acceptance of stale or unrelated packets
 - **Stale packet flushing** — reads all queued UDP packets and keeps only the last valid one, handling servers that send extension fields or duplicate responses
 - **Configurable intervals** — set custom poll, retry, and response timeouts
