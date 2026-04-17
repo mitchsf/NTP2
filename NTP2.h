@@ -14,7 +14,7 @@ typedef unsigned long time_t;
 #endif
 
 #define SEVENTYYEARS       2208988800UL
-#define NTP_SERVER         "pool.ntp.org"
+#define NTP_SERVER         "time.google.com"
 #define NTP_PACKET_SIZE    48
 #define NTP_PORT           123
 #define NTP_RESPONSE_DELAY 250
