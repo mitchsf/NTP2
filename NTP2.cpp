@@ -181,10 +181,16 @@ NTPStatus NTP2::processNTPResponse() {
 }
 
 NTPStatus NTP2::badRead() {
+  // A transient bad response must not destroy a previously-good sync. Clocks
+  // built on this library extrapolate the current time from ntpTimeSeconds /
+  // lastSyncMillis via epoch(); wiping those on a single bad packet causes
+  // the clock to freeze until the next successful sync (which can take a
+  // long time if DNS or the UDP path is temporarily wedged).
+  //
+  // Pace the next retry and record the failure status, but keep the prior
+  // sync's data intact. ntpStat() now reflects "is there a usable sync"
+  // (ntpTimeSeconds > 0), so callers get true across brief outages.
   activeInterval = retryDelayValue;
-  ntpTimeSeconds = 0;
-  lastSyncMillis = 0;
-  ntpMillisAtSync = 0;
   ntpSt = NTP_BAD_PACKET;
   return ntpSt;
 }
@@ -260,5 +266,10 @@ uint32_t NTP2::timestamp() {
 }
 
 bool NTP2::ntpStat() {
-  return (ntpSt == NTP_CONNECTED);
+  // "Do we have a usable synced time?" — true as soon as we've had any
+  // successful sync, and stays true across transient bad packets. Callers
+  // pairing this with epoch() get a continuously-advancing clock; callers
+  // wanting current-packet status should check the return of update() /
+  // forceUpdate() instead.
+  return (ntpTimeSeconds > 0 && lastSyncMillis > 0);
 }
