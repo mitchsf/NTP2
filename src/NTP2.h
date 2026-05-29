@@ -57,6 +57,15 @@ class NTP2 {
     void responseDelay(uint32_t newDelay);
     void retryDelay(uint32_t newDelay);
 
+    // Set the local UDP port used for the client socket. Call before begin()
+    // (or call stop() then begin() again to re-bind). Default is 123 — keeps
+    // existing single-component callers working byte-for-byte. Pass 0 to let
+    // the OS pick an ephemeral port; use this when another component on the
+    // same device already binds 123 (e.g. an NTP server class on the same
+    // ESP32). Side note: NTP doesn't require the client to send from 123 —
+    // the standard says ephemeral source is fine for unicast clients.
+    void setLocalPort(uint16_t port);
+
     NTPStatus update();
     NTPStatus forceUpdate();
 
@@ -78,6 +87,7 @@ class NTP2 {
     uint8_t ntpRequest[NTP_PACKET_SIZE];
     uint8_t ntpQuery[NTP_PACKET_SIZE];
 
+    uint16_t localPort = NTP_PORT;       // overridable via setLocalPort(); 0 = ephemeral
     uint32_t defaultInterval = NTP_POLL_INTERVAL;
     uint32_t activeInterval = defaultInterval;
     uint32_t responseDelayValue = NTP_RESPONSE_DELAY;

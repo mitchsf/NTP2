@@ -22,7 +22,7 @@ void NTP2::begin() {
 
 void NTP2::begin(const char* server) {
   this->server = server ? server : NTP_SERVER;
-  udp->begin(NTP_PORT);
+  udp->begin(localPort);
   force = true;
   lastUpdate = millis() - activeInterval;
 }
@@ -30,9 +30,13 @@ void NTP2::begin(const char* server) {
 void NTP2::begin(IPAddress serverIP) {
   this->serverIP = serverIP;
   this->server = nullptr;
-  udp->begin(NTP_PORT);
+  udp->begin(localPort);
   force = true;
   lastUpdate = millis() - activeInterval;
+}
+
+void NTP2::setLocalPort(uint16_t port) {
+  localPort = port;
 }
 
 void NTP2::stop() {
@@ -190,6 +194,12 @@ NTPStatus NTP2::badRead() {
   // Pace the next retry and record the failure status, but keep the prior
   // sync's data intact. ntpStat() now reflects "is there a usable sync"
   // (ntpTimeSeconds > 0), so callers get true across brief outages.
+  //
+  // Reset lastUpdate to "now" so the retryDelay gate runs from this moment
+  // forward — without this, lastUpdate stayed pinned at the previous send
+  // time and the next send fired as soon as (responseDelay) elapsed,
+  // making retryDelay dead code whenever retryDelay < responseDelay.
+  lastUpdate = millis();
   activeInterval = retryDelayValue;
   ntpSt = NTP_BAD_PACKET;
   return ntpSt;
