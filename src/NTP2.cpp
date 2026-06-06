@@ -63,15 +63,22 @@ NTPStatus NTP2::forceUpdate() {
 
 NTPStatus NTP2::update() {
   if (requestTimestamp != 0) {
-    if ((int32_t)(millis() - requestTimestamp) >= (int32_t)responseDelayValue) {
-      NTPStatus result = processNTPResponse();
-      if (result == NTP_CONNECTED) {
-        return NTP_CONNECTED;
-      }
+    // Poll for the reply on every call and read it the instant it arrives, so
+    // the sync is timestamped at true arrival instead of requestTime+responseDelay.
+    // The old code waited the full responseDelay window THEN read the buffered
+    // packet, stamping lastSyncMillis ~responseDelay late while using the server's
+    // earlier transmit timestamp — which left every synced clock ~responseDelay slow.
+    // responseDelay is now a TIMEOUT: give up only if nothing valid arrives in time.
+    NTPStatus result = processNTPResponse();   // returns NTP_IDLE until our reply lands
+    if (result != NTP_IDLE) {                  // resolved: good packet, KoD, or bad
+      requestTimestamp = 0;
       return result;
-    } else {
-      return NTP_IDLE;
     }
+    if ((int32_t)(millis() - requestTimestamp) >= (int32_t)responseDelayValue) {
+      requestTimestamp = 0;                    // timed out waiting for the reply
+      return badRead();
+    }
+    return NTP_IDLE;                           // still waiting — poll again next call
   }
 
   if (force || (int32_t)(millis() - lastUpdate) >= (int32_t)activeInterval) {
@@ -100,7 +107,8 @@ NTPStatus NTP2::sendNTPRequest() {
 }
 
 NTPStatus NTP2::processNTPResponse() {
-  requestTimestamp = 0;
+  // requestTimestamp is owned by update() now: this function may be called
+  // repeatedly (polling) and returns NTP_IDLE until our reply actually arrives.
   memset(ntpQuery, 0, NTP_PACKET_SIZE);
   
   // Read all available packets, keeping the last complete one
@@ -120,7 +128,7 @@ NTPStatus NTP2::processNTPResponse() {
   }
   
   if (!gotPacket) {
-    return badRead();
+    return NTP_IDLE;   // nothing yet — update() keeps polling until the timeout
   }
 
   uint8_t mode = ntpQuery[0] & 0x07;
@@ -153,7 +161,7 @@ NTPStatus NTP2::processNTPResponse() {
                      (uint32_t)ntpQuery[31];
 
   if (orgSec != reqTxSec || orgFrac != reqTxFrac) {
-    return badRead();
+    return NTP_IDLE;   // stray/stale packet, not our reply — keep polling
   }
 
   // Extract transmit timestamp
@@ -173,13 +181,24 @@ NTPStatus NTP2::processNTPResponse() {
 
   if (!checkValid(txSec)) return badRead();
 
+  // Round-trip delay compensation: the server's transmit timestamp is its time
+  // when it SENT the reply; ~RTT/2 elapses before the reply reaches us. Add half
+  // the measured round trip (requestTimestamp = send time, still set here — update()
+  // clears it after we return) so the synced clock reflects true time at RECEPTION
+  // rather than at the server's send instant. This removes the residual ~one-way
+  // delay that remained after the poll-on-arrival fix.
+  uint32_t readMs = millis();
+  uint32_t rtt    = (uint32_t)(int32_t)(readMs - requestTimestamp);
+  if (rtt > 60000UL) rtt = 0;          // ignore implausible round trips (wrap/garbage)
+  lastRttMs = (uint16_t)rtt;           // exposed for diagnostics
+
   ntpTimeSeconds = txSec;
-  lastSyncMillis = millis();
+  lastSyncMillis = readMs;
   // Fix overflow: cast txSec to uint64_t before multiplication
-  ntpMillisAtSync = ((uint64_t)txSec * 1000ULL) + fracMillis;
+  ntpMillisAtSync = ((uint64_t)txSec * 1000ULL) + fracMillis + (rtt / 2);
   if (activeInterval != defaultInterval) activeInterval = defaultInterval;
 
-  lastResponseMillis = millis();
+  lastResponseMillis = readMs;
   ntpSt = NTP_CONNECTED;
   return NTP_CONNECTED;
 }
@@ -259,8 +278,12 @@ time_t NTP2::epoch() {
   uint64_t currentNtpMillis = ntpMillisAtSync + (uint32_t)elapsedMs;
   
   // Convert to Unix epoch (seconds since Jan 1, 1970)
-  // NTP epoch is Jan 1, 1900, so subtract 70 years in seconds
-  time_t unixNow = (time_t)((currentNtpMillis / 1000ULL) - SEVENTYYEARS);
+  // NTP epoch is Jan 1, 1900, so subtract 70 years in seconds.
+  // Round to the NEAREST second (+500 ms before the divide) rather than
+  // flooring — a plain integer divide left the clock set to the whole second
+  // below the true time, biasing every NTP2-synced clock up to ~1 s slow.
+  // Rounding centers the error at ~0 (±0.5 s) so the display tracks true time.
+  time_t unixNow = (time_t)(((currentNtpMillis + 500ULL) / 1000ULL) - SEVENTYYEARS);
 
   // Plausibility guard: reject obviously-wrong epochs.
   // Adjust these bounds if you need to support earlier dates.

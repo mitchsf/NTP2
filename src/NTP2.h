@@ -73,6 +73,10 @@ class NTP2 {
     uint32_t timestamp();
     bool ntpStat();
 
+    // Round-trip time (ms) of the last successful sync — diagnostics; half of
+    // this is added to the synced time as the one-way delay correction.
+    uint16_t lastRttMs = 0;
+
   private:
     void init();
     bool checkValid(uint32_t tempTimeSeconds);
