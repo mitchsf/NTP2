@@ -294,6 +294,26 @@ time_t NTP2::epoch() {
   return unixNow;
 }
 
+uint64_t NTP2::epochMillis() {
+  if (ntpTimeSeconds == 0 || lastSyncMillis == 0) return 0;
+
+  uint32_t now = millis();
+  int32_t elapsedMs = (int32_t)(now - lastSyncMillis);
+  if (elapsedMs < 0) elapsedMs = 0;
+
+  // Same extrapolation as epoch(), but returned at full millisecond
+  // resolution instead of rounded to the whole second.
+  uint64_t currentNtpMillis = ntpMillisAtSync + (uint32_t)elapsedMs;
+  uint64_t unixMs = currentNtpMillis - (uint64_t)SEVENTYYEARS * 1000ULL;
+
+  // Same plausibility window as epoch() (2000-01-01 .. 2100-01-01).
+  const uint64_t MIN_OK = 946684800ULL  * 1000ULL;
+  const uint64_t MAX_OK = 4102444800ULL * 1000ULL;
+  if (unixMs < MIN_OK || unixMs > MAX_OK) return 0;
+
+  return unixMs;
+}
+
 uint32_t NTP2::timestamp() {
   return lastResponseMillis;
 }

@@ -70,6 +70,14 @@ class NTP2 {
     NTPStatus forceUpdate();
 
     time_t epoch();
+
+    // Current true time in Unix MILLISECONDS, extrapolated from the last sync.
+    // Preserves the server's fractional timestamp + RTT/2 correction that
+    // epoch() rounds away — use this for sub-second phase alignment (e.g.
+    // locking a display's second rollover to the true UTC boundary).
+    // Returns 0 when there is no usable sync. ms-into-second = value % 1000.
+    uint64_t epochMillis();
+
     uint32_t timestamp();
     bool ntpStat();
 
